@@ -52,3 +52,6 @@ Coming soon
 
 ## 📜 License
 MIT License – free to use, modify, and share.
+
+## Shout Outs
+Big thank you to Davidjoshualightman who did a lot of the heavy lifting and posted his findings to various online sources.
