@@ -18,6 +18,7 @@ Little League Baseball was one of my favourite games growing up. After spending 
 ## Future enhancements
 - Team editor to change the name of the team and maybe the colours
 - Better understanding of the pitcher profiles for each team
+- Add player position editor in a separate tab 
 
 ### Likely not going to happen
 - Add new teams
