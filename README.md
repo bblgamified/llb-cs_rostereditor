@@ -40,5 +40,3 @@ Coming soon
 
 ## 📜 License
 MIT License – free to use, modify, and share.
-
-## MIT License – free to use, modify, and share.
