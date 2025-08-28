@@ -15,6 +15,17 @@ Little League Baseball was one of my favourite games growing up. After spending 
 - Save changes directly to a ROM or export an IPS patch for sharing.
 - Simple UI with two tabs: **Roster** and **Pitching**.
 
+## Future enhancements
+- Team editor to change the name of the team and maybe the colours
+- Better understanding of the pitcher profiles for each team
+
+### Likely not going to happen
+- Add new teams
+- Bigger rosters
+- Tournament bracket changes
+- Save/load function
+- Stats
+
 ## 🚀 Usage
 1. Install requirements:
    ```bash
