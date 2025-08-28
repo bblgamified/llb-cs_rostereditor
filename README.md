@@ -26,8 +26,7 @@ Little League Baseball was one of my favourite games growing up. After spending 
 4. Edit roster data and pitcher profiles.
 5. Save the modified ROM or create an IPS patch.
 
-⚠️ Notes
-
+## ⚠️ Notes
 This editor requires a clean NES ROM of Little League Baseball: Championship Series.
 
 Always back up your ROM before editing.
@@ -36,10 +35,10 @@ Offsets must be set manually depending on which team you want to edit.
 
 This project is for educational and nostalgic purposes only.
 
-📷 Screenshots
+## 📷 Screenshots
+Coming soon
 
-
-
-📜 License
-
+## 📜 License
 MIT License – free to use, modify, and share.
+
+## MIT License – free to use, modify, and share.
