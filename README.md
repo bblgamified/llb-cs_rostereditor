@@ -20,7 +20,8 @@ Little League Baseball was one of my favourite games growing up. After spending 
    ```bash
    pip install PySide6
 2. Run the editor:
-   ```python llb_roster_editor.py
+   ```bash
+   python llb_roster_editor.py
 3. Load your .nes ROM and the team’s starting offset.
 4. Edit roster data and pitcher profiles.
 5. Save the modified ROM or create an IPS patch.
