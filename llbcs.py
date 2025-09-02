@@ -23,11 +23,6 @@ Pitcher profiles (3×8 bytes) begin after the all-FF padding line that ends the 
 Profile byte meanings (partial):
   byte0: top bit = hand (0x80 left), low nibble delivery (0=Normal,1=Hard,2=Sidearm)
   byte1=Stamina, byte2=Quality/Movement, byte3=Tune(0–15), byte6=Displayed Pitch skill(0–4), byte7=Mult(00/02)
-
-New in this version:
- • Team dropdown wired to full offset map (16 teams)
- • Removed Throw Hand column (no standalone byte; bat side mirrors throw hand)
- • New "Team Colors" tab to edit two primary colors per team via the LLB palette
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -84,6 +79,26 @@ TEAM_OFFSETS_COLOUR = {
     "Florida":       0x1FAFD,
 }
 
+# --- Lineup (positions/batting order) addresses per team (9 bytes each) ---
+TEAM_LINEUP_ADDRS = {
+    "Japan":        [0x116DA,0x116DB,0x116DC,0x116DD,0x116DE,0x116DF,0x116E0,0x116E1,0x116E2],
+    "Arizona":      [0x116E3,0x116E4,0x116E5,0x116E6,0x116E7,0x116E8,0x116E9,0x116EA,0x116EB],
+    "Pennsylvania": [0x116EC,0x116ED,0x116EE,0x116EF,0x116F0,0x116F1,0x116F2,0x116F3,0x116F4],
+    "Chinese Taipei":[0x116F5,0x116F6,0x116F7,0x116F8,0x116F9,0x116FA,0x116FB,0x116FC,0x116FD],
+    "Korea":        [0x116FE,0x116FF,0x11700,0x11701,0x11702,0x11703,0x11704,0x11705,0x11706],
+    "New York":     [0x11707,0x11708,0x11709,0x1170A,0x1170B,0x1170C,0x1170D,0x1170E,0x1170F],
+    "California":   [0x11710,0x11711,0x11712,0x11713,0x11714,0x11715,0x11716,0x11717,0x11718],
+    "Texas":        [0x11719,0x1171A,0x1171B,0x1171C,0x1171D,0x1171E,0x1171F,0x11720,0x11721],
+    "Hawaii":       [0x11722,0x11723,0x11724,0x11725,0x11726,0x11727,0x11728,0x11729,0x1172A],
+    "Spain":        [0x1172B,0x1172C,0x1172D,0x1172E,0x1172F,0x11730,0x11731,0x11732,0x11733],
+    "Puerto Rico":  [0x11734,0x11735,0x11736,0x11737,0x11738,0x11739,0x1173A,0x1173B,0x1173C],
+    "Mexico":       [0x1173D,0x1173E,0x1173F,0x11740,0x11741,0x11742,0x11743,0x11744,0x11745],
+    "Canada":       [0x11746,0x11747,0x11748,0x11749,0x1174A,0x1174B,0x1174C,0x1174D,0x1174E],
+    "Italy":        [0x1174F,0x11750,0x11751,0x11752,0x11753,0x11754,0x11755,0x11756,0x11757],
+    "Illinois":     [0x11758,0x11759,0x1175A,0x1175B,0x1175C,0x1175D,0x1175E,0x1175F,0x11760],
+    "Florida":      [0x11761,0x11762,0x11763,0x11764,0x11765,0x11766,0x11767,0x11768,0x11769],
+}
+
 # Body mapping (byte 6)
 BODY_TYPE_MAP = {
     0x00: "Right Tall",
@@ -98,7 +113,11 @@ CODE_FROM_SIZE = {v: k for k, v in SIZE_FROM_CODE.items()}
 PI_CHOICES   = [0x00, 0x08, 0x10, 0x18]
 CONST14_CHOICES = [0x00, 0x02, 0x03, 0x04]
 
-# NES LLB palette: value is HSV as "H,S,V" (H 0..360, S/V 0..255). Some S/V values may be out-of-range in source; we clamp.
+# Position labels
+POS_LIST = ["P","C","1B","2B","3B","SS","LF","CF","RF"]
+POS_TO_IDX = {name:i for i,name in enumerate(POS_LIST)}
+
+# NES LLB palette: value is HSV as "H,S,V"
 LLB_COLOR_PALETTE_MAP = {
     0x00: "0,0,116", 0x01: "246,211,140", 0x02: "240,255,168", 0x03: "266,255,156",
     0x04: "310,255,140", 0x05: "354,255,168", 0x06: "0,255,164", 0x07: "3,255,124",
@@ -189,6 +208,30 @@ class RosterModel:
         self._parse_team()
         self._parse_profiles()
 
+    # --- Lineup byte encoding (per your correction) ---
+    @staticmethod
+    def bcd_pos_order(byte_val: int) -> tuple[int, int]:
+        """
+        Decode one lineup byte into (pos_idx, order_1to9).
+        High nibble = batting order − 1; Low nibble = position code 1..9.
+        pos_idx is 0..8 mapped as: 0=P,1=C,2=1B,3=2B,4=3B,5=SS,6=LF,7=CF,8=RF.
+        """
+        order = ((byte_val >> 4) & 0xF) + 1
+        pos_code = byte_val & 0xF
+        pos_idx = (pos_code - 1) if 1 <= pos_code <= 9 else 0
+        return pos_idx, order
+
+    @staticmethod
+    def make_bcd_pos_order(pos_idx: int, order_1to9: int) -> int:
+        """
+        Encode (pos_idx 0..8, order 1..9) into one byte:
+        byte = ((order-1) << 4) | (pos_code), where pos_code = pos_idx+1.
+        """
+        order = max(1, min(9, int(order_1to9)))
+        pos_code = max(1, min(9, int(pos_idx) + 1))
+        return ((order - 1) << 4) | pos_code
+
+    # --- Helpers ---
     @staticmethod
     def _encode_name6(s: str) -> bytes:
         s = (s or '').upper()[:NAME_LEN]
@@ -201,8 +244,9 @@ class RosterModel:
         if len(chunk) != ROW_LEN:
             return None
         name_b = chunk[:NAME_LEN]
-        if 0x00 in name_b:
-            name_b = name_b.split(b" ", 1)[0]
+        # Be robust to stray NULs (rare)
+        if b"\x00" in name_b:
+            name_b = name_b.split(b"\x00", 1)[0]
         name = name_b.decode('ascii','ignore').rstrip(' ')
         attrs = chunk[NAME_LEN:]
         body_type = attrs[0]
@@ -256,18 +300,53 @@ class RosterModel:
     # --- Team colors ---
     def read_team_colors(self, team_name: str) -> Optional[Tuple[int,int]]:
         off = TEAM_OFFSETS_COLOUR.get(team_name)
-        if off is None: return None
-        if off + 1 >= len(self.buf): return None
+        if off is None or off + 1 >= len(self.buf): return None
         return self.buf[off], self.buf[off+1]
 
     def write_team_colors(self, team_name: str, primary_idx: int, secondary_idx: int) -> None:
         off = TEAM_OFFSETS_COLOUR.get(team_name)
-        if off is None: return
-        if off + 1 >= len(self.buf): return
+        if off is None or off + 1 >= len(self.buf): return
         self.buf[off]   = primary_idx & 0xFF
         self.buf[off+1] = secondary_idx & 0xFF
 
+    # --- Lineup read/write (order→position) ---
+    def get_positions_by_order(self, team_name: str) -> Optional[list[int]]:
+        """
+        Return pos_by_order[0..8] where index 0 = batter #1, value is pos_idx 0..8.
+        Uses the low nibble (pos_code) and sorts by the high nibble (order-1).
+        """
+        addrs = TEAM_LINEUP_ADDRS.get(team_name)
+        if not addrs:
+            return None
+        pos_by_order = [0] * 9
+        for a in addrs:
+            if a >= len(self.buf):
+                return None
+            b = self.buf[a]
+            pos_idx, order = self.bcd_pos_order(b)
+            if 1 <= order <= 9:
+                pos_by_order[order - 1] = pos_idx
+        return pos_by_order
+
+    def write_lineup_positions_by_order(self, team_name: str, pos_by_order: list[int]) -> None:
+        """
+        Write back 9 bytes such that for the entry whose high nibble encodes order (o-1),
+        the low nibble becomes (pos_idx+1) for that order o. Preserves address↔order mapping.
+        """
+        addrs = TEAM_LINEUP_ADDRS.get(team_name)
+        if not addrs or len(pos_by_order) != 9:
+            return
+        for a in addrs:
+            if a >= len(self.buf):
+                continue
+            old_b = self.buf[a]
+            _pos_idx, order = self.bcd_pos_order(old_b)  # get order (1..9)
+            pos_idx = pos_by_order[max(1, min(9, order)) - 1]
+            self.buf[a] = self.make_bcd_pos_order(pos_idx, order)
+
+    # --- Apply & Save ---
     def apply_players(self, players: List[Player]) -> None:
+        """Write edited player rows back into buffer."""
         self.players = players
         for p in players:
             row = bytearray(self.buf[p.row_offset:p.row_offset+ROW_LEN])
@@ -279,7 +358,7 @@ class RosterModel:
             row[NAME_LEN+4]  = p.speed       # byte10
             row[NAME_LEN+5]  = max(0, min(4, p.hit))  # byte11
             row[NAME_LEN+6]  = p.pi if p.pi in PI_CHOICES else 0x00  # byte12
-            # byte13 buffer preserved
+            # byte13 (buffer) preserved
             row[NAME_LEN+8]  = p.const14     # byte14
             # byte15 preserved
             self.buf[p.row_offset:p.row_offset+ROW_LEN] = row
@@ -331,7 +410,6 @@ class EditorUI(QWidget):
         self.rom_edit = QLineEdit(); self.rom_edit.setPlaceholderText("ROM file")
         browse = QPushButton("Browse"); browse.clicked.connect(self.on_browse)
         self.team_combo = QComboBox()
-        # Populate in requested map order
         for name in TEAM_OFFSETS.keys():
             self.team_combo.addItem(name)
         self.team_combo.setEnabled(False)
@@ -343,54 +421,68 @@ class EditorUI(QWidget):
         # Tabs
         self.tabs = QTabWidget()
 
-        # Roster tab (no Throw Hand column; bat side mirrors throw hand per byte6)
+        # Roster tab
+        roster_wrap = QWidget(); roster_v = QVBoxLayout(roster_wrap)
         self.roster_table = QTableWidget(0, 9)
         self.roster_table.setHorizontalHeaderLabels([
             "Name", "Bat Side", "Body Size",
-            "Skill(0-4)", "PI (08/10/18)", "RUN SPD",
-            "ARM POW", "UNK8", "Const14"
+            "HIT (0-4)", "PI (08/10/18)", "RUN SPD",
+            "ARM POWER", "UNK8", "Const14"
         ])
+        roster_v.addWidget(self.roster_table)
+        self.apply_roster_btn = QPushButton("Apply Roster to Buffer")
+        self.apply_roster_btn.clicked.connect(self.on_apply_roster)
+        roster_v.addWidget(self.apply_roster_btn)
 
         # Pitching tab
+        pitching_wrap = QWidget(); pitch_v = QVBoxLayout(pitching_wrap)
         self.pitch_table = QTableWidget(3, 8)
         self.pitch_table.setHorizontalHeaderLabels([
             "Profile #", "Hand", "Delivery", "Stamina", "Quality", "Tune", "Skill(0-4)", "Mult"
         ])
+        pitch_v.addWidget(self.pitch_table)
+        self.apply_pitch_btn = QPushButton("Apply Pitching to Buffer")
+        self.apply_pitch_btn.clicked.connect(self.on_apply_pitching)
+        pitch_v.addWidget(self.apply_pitch_btn)
 
         # Team Colors tab
-        self.colors_tab = QWidget()
-        colors_layout = QVBoxLayout(self.colors_tab)
+        self.colors_tab = QWidget(); colors_layout = QVBoxLayout(self.colors_tab)
         title = QLabel("Team Colors (NES palette indices)")
         colors_layout.addWidget(title)
         row1 = QHBoxLayout(); row2 = QHBoxLayout()
-        # Primary
         row1.addWidget(QLabel("Primary:"))
         self.primary_combo = QComboBox()
         for idx in sorted(LLB_COLOR_PALETTE_MAP.keys()):
             self.primary_combo.addItem(f"0x{idx:02X}", idx)
         self.primary_swatch = make_swatch(QColor(0,0,0))
         row1.addWidget(self.primary_combo); row1.addWidget(self.primary_swatch)
-        # Secondary
         row2.addWidget(QLabel("Secondary:"))
         self.secondary_combo = QComboBox()
         for idx in sorted(LLB_COLOR_PALETTE_MAP.keys()):
             self.secondary_combo.addItem(f"0x{idx:02X}", idx)
         self.secondary_swatch = make_swatch(QColor(0,0,0))
         row2.addWidget(self.secondary_combo); row2.addWidget(self.secondary_swatch)
-        colors_layout.addLayout(row1)
-        colors_layout.addLayout(row2)
-        # Save colors button
-        row3 = QHBoxLayout(); row3.addStretch(1)
-        save_colors = QPushButton("Save Team Colors"); save_colors.clicked.connect(self.on_save_colors)
-        row3.addWidget(save_colors)
-        colors_layout.addLayout(row3)
-        # Swatch updates
+        colors_layout.addLayout(row1); colors_layout.addLayout(row2)
+        self.apply_colors_btn = QPushButton("Apply Team Colors to Buffer")
+        self.apply_colors_btn.clicked.connect(self.on_apply_colors)
+        colors_layout.addWidget(self.apply_colors_btn)
+        # Live preview auto-writes to buffer
         self.primary_combo.currentIndexChanged.connect(self.on_palette_changed)
         self.secondary_combo.currentIndexChanged.connect(self.on_palette_changed)
 
-        self.tabs.addTab(self.roster_table, "Roster")
-        self.tabs.addTab(self.pitch_table, "Pitching")
+        # Lineup tab (order → position)
+        self.lineup_tab = QWidget(); lu_v = QVBoxLayout(self.lineup_tab)
+        self.lineup_table = QTableWidget(9, 2)
+        self.lineup_table.setHorizontalHeaderLabels(["Batting Order", "Position"])
+        lu_v.addWidget(self.lineup_table)
+        self.apply_lineup_btn = QPushButton("Apply Lineup to Buffer")
+        self.apply_lineup_btn.clicked.connect(self.on_apply_lineup)
+        lu_v.addWidget(self.apply_lineup_btn)
+
+        self.tabs.addTab(roster_wrap, "Roster")
+        self.tabs.addTab(pitching_wrap, "Pitching")
         self.tabs.addTab(self.colors_tab, "Team Colors")
+        self.tabs.addTab(self.lineup_tab, "Lineup")
         root.addWidget(self.tabs)
 
         bottom = QHBoxLayout()
@@ -426,36 +518,30 @@ class EditorUI(QWidget):
         self.populate_roster()
         self.populate_pitching()
         self.populate_colors()
+        self.populate_lineup()
 
     # --- Populate tabs ---
     def populate_roster(self):
         self.roster_table.setRowCount(len(self.model.players))
         for r,p in enumerate(self.model.players):
             self.roster_table.setItem(r,0,QTableWidgetItem(p.name))
-            # Byte6 => hand/size (bat side mirrors hand)
             is_left = bool(p.body_type & 0x80)
             size = SIZE_FROM_CODE.get(p.body_type & 0x03, "Tall")
             bat_c  = QComboBox(); bat_c.addItems(["Right","Left"]) ; bat_c.setCurrentText("Left" if is_left else "Right")
             size_c = QComboBox(); size_c.addItems(["Tall","Fat","Short"]) ; size_c.setCurrentText(size)
             self.roster_table.setCellWidget(r,1,bat_c)
             self.roster_table.setCellWidget(r,2,size_c)
-            # Byte11 HIT (0–4)
             hit = QSpinBox(); hit.setRange(0,4); hit.setValue(p.hit)
             self.roster_table.setCellWidget(r,3,hit)
-            # Byte12 PI
             pi = QComboBox(); [pi.addItem(f"0x{v:02X}", v) for v in PI_CHOICES]
             pi.setCurrentIndex(max(0, PI_CHOICES.index(p.pi) if p.pi in PI_CHOICES else 0))
             self.roster_table.setCellWidget(r,4,pi)
-            # Byte10 SPEED
             spd = QSpinBox(); spd.setRange(0,255); spd.setValue(p.speed)
             self.roster_table.setCellWidget(r,5,spd)
-            # Byte9 ARM
             arm = QSpinBox(); arm.setRange(0,255); arm.setValue(p.arm)
             self.roster_table.setCellWidget(r,6,arm)
-            # Byte8 UNK8
             unk8 = QSpinBox(); unk8.setRange(0,255); unk8.setValue(p.unk8)
             self.roster_table.setCellWidget(r,7,unk8)
-            # Byte14 Const14
             c14 = QComboBox(); [c14.addItem(f"0x{v:02X}", v) for v in CONST14_CHOICES]
             if p.const14 not in CONST14_CHOICES:
                 c14.insertItem(0, f"0x{p.const14:02X}", p.const14); c14.setCurrentIndex(0)
@@ -483,7 +569,7 @@ class EditorUI(QWidget):
             self.pitch_table.setCellWidget(i,7,mu)
 
     def populate_colors(self):
-        if not self.loaded_team:
+        if not (self.model and self.loaded_team):
             return
         current = self.model.read_team_colors(self.loaded_team)
         if current:
@@ -494,73 +580,133 @@ class EditorUI(QWidget):
             i2 = self.secondary_combo.findData(sec)
             if i2 != -1:
                 self.secondary_combo.setCurrentIndex(i2)
-        # ensure swatches reflect current selection and buffer is updated
         self.on_palette_changed()
 
-    # --- Harvest & Save ---
-    def harvest_players(self) -> List[Player]:
-        out: List[Player] = []
-        for r,p in enumerate(self.model.players):
-            name = self.roster_table.item(r,0).text() if self.roster_table.item(r,0) else p.name
-            bat  = self.roster_table.cellWidget(r,1).currentText()  # type: ignore
-            size = self.roster_table.cellWidget(r,2).currentText()  # type: ignore
-            hit  = self.roster_table.cellWidget(r,3).value()        # type: ignore
-            piw  = self.roster_table.cellWidget(r,4)                # type: ignore
-            pi   = piw.currentData() if hasattr(piw,'currentData') else p.pi
-            spd  = self.roster_table.cellWidget(r,5).value()        # type: ignore
-            arm  = self.roster_table.cellWidget(r,6).value()        # type: ignore
-            unk8 = self.roster_table.cellWidget(r,7).value()        # type: ignore
-            c14w = self.roster_table.cellWidget(r,8)                # type: ignore
-            const14 = c14w.currentData() if hasattr(c14w,'currentData') else p.const14
-            # Byte6 couples hand & bat side; derive from bat side + size
-            body_code = CODE_FROM_SIZE.get(size,0)
+    def on_palette_changed(self, *_):
+        try:
+            p_idx = self.primary_combo.currentData()
+            s_idx = self.secondary_combo.currentData()
+        except Exception:
+            return
+        p_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(p_idx, "0,0,0"))
+        s_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(s_idx, "0,0,0"))
+        for frame, col in ((self.primary_swatch, p_col), (self.secondary_swatch, s_col)):
+            pal = frame.palette()
+            pal.setColor(QPalette.Window, col)
+            frame.setPalette(pal)
+        if self.model and self.loaded_team and p_idx is not None and s_idx is not None:
+            self.model.write_team_colors(self.loaded_team, int(p_idx), int(s_idx))
+
+    def populate_lineup(self):
+        """Show 9 rows: Batting Order (1..9) with a Position dropdown for each slot."""
+        self.lineup_table.setRowCount(9)
+        for order_idx in range(9):
+            self.lineup_table.setItem(order_idx, 0, QTableWidgetItem(str(order_idx + 1)))
+            combo = QComboBox()
+            for pos_idx, label in enumerate(POS_LIST):
+                combo.addItem(label, pos_idx)  # data = 0..8
+            self.lineup_table.setCellWidget(order_idx, 1, combo)
+        if self.loaded_team:
+            pos_by_order = self.model.get_positions_by_order(self.loaded_team)
+            if pos_by_order:
+                for order_idx in range(9):
+                    w = self.lineup_table.cellWidget(order_idx, 1)
+                    target_pos = int(pos_by_order[order_idx])
+                    idx = w.findData(target_pos) if hasattr(w, "findData") else target_pos
+                    if 0 <= idx < w.count():
+                        w.setCurrentIndex(idx)
+
+    # ---------- Harvest current UI state ----------
+    def harvest_players(self):
+        out = []
+        for r, p in enumerate(self.model.players):
+            name = self.roster_table.item(r, 0).text() if self.roster_table.item(r, 0) else p.name
+            bat  = self.roster_table.cellWidget(r, 1).currentText()
+            size = self.roster_table.cellWidget(r, 2).currentText()
+            hit  = self.roster_table.cellWidget(r, 3).value()
+            piw  = self.roster_table.cellWidget(r, 4);  pi = piw.currentData() if hasattr(piw, 'currentData') else p.pi
+            spd  = self.roster_table.cellWidget(r, 5).value()
+            arm  = self.roster_table.cellWidget(r, 6).value()
+            unk8 = self.roster_table.cellWidget(r, 7).value()
+            c14w = self.roster_table.cellWidget(r, 8);  const14 = c14w.currentData() if hasattr(c14w, 'currentData') else p.const14
+            body_code = CODE_FROM_SIZE.get(size, 0)
             if bat == "Left":
                 body_code |= 0x80
             out.append(Player(name, body_code, unk8, arm, spd, hit, pi, const14, p.row_offset))
         return out
 
-    def harvest_profiles(self) -> List[PitchProfile]:
-        out: List[PitchProfile] = []
+    def harvest_profiles(self):
+        out = []
         for i, pr in enumerate(self.model.profiles):
-            hand = self.pitch_table.cellWidget(i,1).currentText()   # type: ignore
-            delv = self.pitch_table.cellWidget(i,2).currentText()   # type: ignore
-            st   = self.pitch_table.cellWidget(i,3).value()         # type: ignore
-            ql   = self.pitch_table.cellWidget(i,4).value()         # type: ignore
-            tn   = self.pitch_table.cellWidget(i,5).value()         # type: ignore
-            sk   = self.pitch_table.cellWidget(i,6).value()         # type: ignore
-            muw  = self.pitch_table.cellWidget(i,7)                 # type: ignore
-            mu   = muw.currentData() if hasattr(muw,'currentData') else pr.mult
+            hand = self.pitch_table.cellWidget(i, 1).currentText()
+            delv = self.pitch_table.cellWidget(i, 2).currentText()
+            st   = self.pitch_table.cellWidget(i, 3).value()
+            ql   = self.pitch_table.cellWidget(i, 4).value()
+            tn   = self.pitch_table.cellWidget(i, 5).value()
+            sk   = self.pitch_table.cellWidget(i, 6).value()
+            muw  = self.pitch_table.cellWidget(i, 7);  mu = muw.currentData() if hasattr(muw, 'currentData') else pr.mult
             new = PitchProfile(pr.offset, bytearray(pr.raw))
-            new.hand = hand
-            new.delivery = delv
-            new.stamina = st
-            new.quality = ql
-            new.tune    = tn
-            new.skill   = sk
-            new.mult    = mu
+            new.hand = hand; new.delivery = delv
+            new.stamina = st; new.quality = ql; new.tune = tn
+            new.skill = sk; new.mult = mu
             out.append(new)
         return out
 
+    def harvest_lineup(self):
+        """Return pos_by_order[0..8] (positions for batting orders 1..9)."""
+        if not self.loaded_team:
+            return None
+        pos_by_order = [0] * 9
+        for order_idx in range(9):
+            w = self.lineup_table.cellWidget(order_idx, 1)
+            pos = w.currentData() if hasattr(w, "currentData") else None
+            if pos is None:
+                try:
+                    pos = POS_TO_IDX[w.currentText()]
+                except Exception:
+                    pos = 0
+            pos_by_order[order_idx] = max(0, min(8, int(pos)))
+        return pos_by_order
+
+    # ---------- Apply-to-buffer buttons ----------
+    def on_apply_roster(self):
+        if not self.model:
+            return
+        self.model.apply_players(self.harvest_players())
+
+    def on_apply_pitching(self):
+        if not self.model:
+            return
+        self.model.apply_profiles(self.harvest_profiles())
+
+    def on_apply_colors(self):
+        if not (self.model and self.loaded_team):
+            return
+        try:
+            prim_idx = self.primary_combo.currentData()
+            sec_idx  = self.secondary_combo.currentData()
+            if prim_idx is not None and sec_idx is not None:
+                self.model.write_team_colors(self.loaded_team, int(prim_idx), int(sec_idx))
+        except Exception:
+            pass
+
+    def on_apply_lineup(self):
+        if not (self.model and self.loaded_team):
+            return
+        pos_by_order = self.harvest_lineup()
+        if pos_by_order:
+            self.model.write_lineup_positions_by_order(self.loaded_team, pos_by_order)
+
+    # ---------- Save ROM / IPS ----------
     def on_save(self):
         if not self.model:
             QMessageBox.information(self, "Save", "Load a team first.")
             return
-        # Harvest roster & profiles
-        players = self.harvest_players()
-        profiles = self.harvest_profiles()
-        self.model.apply_players(players)
-        self.model.apply_profiles(profiles)
-        # Also capture CURRENT Team Colors directly, so no extra click is needed
-        if self.loaded_team is not None:
-            try:
-                prim_idx = self.primary_combo.currentData()
-                sec_idx  = self.secondary_combo.currentData()
-                if prim_idx is not None and sec_idx is not None:
-                    self.model.write_team_colors(self.loaded_team, prim_idx, sec_idx)
-            except Exception:
-                pass
-        path,_=QFileDialog.getSaveFileName(self,"Save",os.getcwd(),"NES ROM (*.nes)")
-        if path: self.model.save_rom(path)
+        # Apply all tabs to buffer first
+        self.on_apply_roster(); self.on_apply_pitching(); self.on_apply_colors(); self.on_apply_lineup()
+        path, _ = QFileDialog.getSaveFileName(self, "Save", os.getcwd(), "NES ROM (*.nes)")
+        if path:
+            self.model.save_rom(path)
 
     def on_save_ips(self):
         if not self.model:
@@ -568,97 +714,39 @@ class EditorUI(QWidget):
             return
         with open(self.model.rom_path, 'rb') as f:
             orig = f.read()
-        # Make sure we apply current UI state for everything, including Team Colors
-        players = self.harvest_players()
-        profiles = self.harvest_profiles()
-        self.model.apply_players(players)
-        self.model.apply_profiles(profiles)
-        if self.loaded_team is not None:
-            try:
-                prim_idx = self.primary_combo.currentData()
-                sec_idx  = self.secondary_combo.currentData()
-                if prim_idx is not None and sec_idx is not None:
-                    self.model.write_team_colors(self.loaded_team, prim_idx, sec_idx)
-            except Exception:
-                pass
+        # Apply all tabs to buffer before diffing
+        self.on_apply_roster(); self.on_apply_pitching(); self.on_apply_colors(); self.on_apply_lineup()
         ips = self._build_ips(orig, bytes(self.model.buf))
-        path,_=QFileDialog.getSaveFileName(self,"Save IPS Patch",os.getcwd(),"IPS Patch (*.ips)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save IPS Patch", os.getcwd(), "IPS Patch (*.ips)")
         if path:
-            with open(path,'wb') as f: f.write(ips)
-
-    def on_save_colors(self):
-        if not (self.model and self.loaded_team):
-            QMessageBox.information(self, "Colors", "Load a team first.")
-            return
-        prim_idx = self.primary_combo.currentData()
-        sec_idx  = self.secondary_combo.currentData()
-        self.model.write_team_colors(self.loaded_team, prim_idx, sec_idx)
-        QMessageBox.information(self, "Colors", "Team colors saved to ROM buffer. Use Save ROM/IPS to persist.")
-
-    def update_color_swatches(self):
-        # Update both swatches from current combo selections
-        p_idx = self.primary_combo.currentData()
-        s_idx = self.secondary_combo.currentData()
-        p_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(p_idx, "0,0,0"))
-        s_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(s_idx, "0,0,0"))
-        for frame, col in ((self.primary_swatch,p_col),(self.secondary_swatch,s_col)):
-            pal = frame.palette(); pal.setColor(QPalette.Window, col); frame.setPalette(pal)
-        # Also auto-apply to ROM buffer if model+team loaded
-        if self.model and self.loaded_team:
-            try:
-                if p_idx is not None and s_idx is not None:
-                    self.model.write_team_colors(self.loaded_team, p_idx, s_idx)
-            except Exception:
-                pass
+            with open(path, 'wb') as f:
+                f.write(ips)
 
     @staticmethod
-    def on_palette_changed(self, *args, **kwargs):
-        # Update swatches and auto-apply palette bytes to the ROM buffer
-        try:
-            p_idx = self.primary_combo.currentData()
-            s_idx = self.secondary_combo.currentData()
-        except Exception:
-            return
-        p_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(p_idx, "0,0,0"))
-        s_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(s_idx, "0,0,0"))
-        for frame, col in ((self.primary_swatch, p_col), (self.secondary_swatch, s_col)):
-            pal = frame.palette(); pal.setColor(QPalette.Window, col); frame.setPalette(pal)
-        if self.model and self.loaded_team and p_idx is not None and s_idx is not None:
-            self.model.write_team_colors(self.loaded_team, int(p_idx), int(s_idx))
-    def on_palette_changed(self, *_):
-        # Update swatches and auto-apply palette bytes to the ROM buffer
-        try:
-            p_idx = self.primary_combo.currentData()
-            s_idx = self.secondary_combo.currentData()
-        except Exception:
-            return
-        p_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(p_idx, "0,0,0"))
-        s_col = hsv_string_to_qcolor(LLB_COLOR_PALETTE_MAP.get(s_idx, "0,0,0"))
-        for frame, col in ((self.primary_swatch, p_col), (self.secondary_swatch, s_col)):
-            pal = frame.palette(); pal.setColor(QPalette.Window, col); frame.setPalette(pal)
-        if self.model and self.loaded_team and p_idx is not None and s_idx is not None:
-            self.model.write_team_colors(self.loaded_team, int(p_idx), int(s_idx))
-
     def _build_ips(orig: bytes, edited: bytes) -> bytes:
         # Minimal IPS writer
         n = min(len(orig), len(edited))
         o = memoryview(orig)[:n]; e = memoryview(edited)[:n]
-        def off3(x:int)->bytes: return bytes([(x>>16)&0xFF,(x>>8)&0xFF,x&0xFF])
+        def off3(x: int) -> bytes: return bytes([(x >> 16) & 0xFF, (x >> 8) & 0xFF, x & 0xFF])
         out = bytearray(b"PATCH")
-        i=0
-        while i<n:
-            if o[i]==e[i]:
-                i+=1; continue
-            start=i
-            while i<n and o[i]!=e[i] and (i-start)<65535:
-                i+=1
-            chunk=e[start:i].tobytes()
+        i = 0
+        while i < n:
+            if o[i] == e[i]:
+                i += 1
+                continue
+            start = i
+            while i < n and o[i] != e[i] and (i - start) < 65535:
+                i += 1
+            chunk = e[start:i].tobytes()
             out += off3(start)
-            out += bytes([(len(chunk)>>8)&0xFF, len(chunk)&0xFF])
+            out += bytes([(len(chunk) >> 8) & 0xFF, len(chunk) & 0xFF])
             out += chunk
         out += b"EOF"
         return bytes(out)
 
-if __name__=='__main__':
-    app=QApplication([])
-    ui=EditorUI(); ui.resize(1200,700); ui.show(); app.exec()
+if __name__ == "__main__":
+    app = QApplication([])
+    ui = EditorUI()
+    ui.resize(1200, 700)
+    ui.show()
+    app.exec()
